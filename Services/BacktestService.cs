@@ -1,4 +1,4 @@
-using BotCripto.Models;
+﻿using BotCripto.Models;
 using BotCripto.Strategies;
 using System.Text;
 
@@ -29,14 +29,14 @@ public class BacktestService
 
     private readonly CryptoDataService _dataService;
     private readonly RiskManager _riskManager;
-    private readonly EmaRibbonTrendFollowingStrategy _strategy;
+    private readonly PositionTradingStrategy _strategy;
     private readonly decimal _initialCapital;
 
     public BacktestService(decimal initialCapital, decimal rewardRiskRatio = 2.0m, decimal capitalPerTrade = decimal.MaxValue)
     {
         _initialCapital = initialCapital;
         _dataService = new CryptoDataService();
-        _strategy = new EmaRibbonTrendFollowingStrategy();
+        _strategy = new PositionTradingStrategy();
         _riskManager = new RiskManager(
             initialCapital,
             riskPercentPerTrade: 0.02m,
@@ -91,7 +91,7 @@ public class BacktestService
         var btcCandles = await _dataService.GetHistoricalCandlesAsync("BTC", timeframe, historyFrom, endDate);
         var btcRegime = new Dictionary<DateTime, bool?>();
         for (int i = 0; i < btcCandles.Count; i++)
-            btcRegime[btcCandles[i].Time] = EmaRibbonTrendFollowingStrategy.IsBtcBullish(Window(btcCandles, i));
+            btcRegime[btcCandles[i].Time] = PositionTradingStrategy.IsBtcBullish(Window(btcCandles, i));
 
         // 1) Scarica tutte le candele prima di simulare: il portafoglio va simulato in ordine cronologico
         //    su tutti i simboli insieme, per sapere in ogni momento quanto capitale è già impegnato.

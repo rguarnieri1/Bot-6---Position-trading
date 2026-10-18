@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using BotCripto.Models;
 using BotCripto.Strategies;
 
@@ -8,14 +8,14 @@ public class BotSchedulerService
 {
     private const int CandlesPerAnalysis = 300;  // stessa finestra del backtest
     private const int MaxConcurrentFetches = 4;
-    private const int MinCandlesForAnalysis = 60; // minimo richiesto dalla strategia
+    private const int MinCandlesForAnalysis = PositionTradingStrategy.MinCandles; // minimo richiesto dalla strategia
     // Un segnale viene valutato solo entro questo tempo dalla chiusura della candela (niente ingressi in ritardo)
     private static readonly TimeSpan SignalFreshness = TimeSpan.FromMinutes(30);
 
     private readonly CryptoDataService _dataService;
     private readonly NotificationService _notificationService;
     private readonly ReportingService _reportingService;
-    private readonly EmaRibbonTrendFollowingStrategy _emaRibbonStrategy;
+    private readonly PositionTradingStrategy _emaRibbonStrategy;
     private readonly RiskManager _riskManager;
     private Timer? _marketCheckTimer;
     private Timer? _weeklyReportTimer;
@@ -43,7 +43,7 @@ public class BotSchedulerService
         _dataService = new CryptoDataService();
         _notificationService = new NotificationService();
         _reportingService = new ReportingService();
-        _emaRibbonStrategy = new EmaRibbonTrendFollowingStrategy();
+        _emaRibbonStrategy = new PositionTradingStrategy();
         _riskManager = new RiskManager(
             initialCapital,
             riskPercentPerTrade: 0.02m,      // 2% rischio per trade
@@ -181,7 +181,7 @@ public class BotSchedulerService
             else
             {
                 // Regime di mercato BTC sulla candela appena chiusa (filtro direzionale della strategia)
-                var btcBullish = EmaRibbonTrendFollowingStrategy.IsBtcBullish(btcClosed);
+                var btcBullish = PositionTradingStrategy.IsBtcBullish(btcClosed);
                 Console.WriteLine($"🕯️  Candela {_timeframe} chiusa alle {lastCloseEnd:yyyy-MM-dd HH:mm} UTC: ricerca segnali");
                 Console.WriteLine($"₿ Regime BTC: {(btcBullish == null ? "sconosciuto (nessun segnale)" : btcBullish.Value ? "rialzista (solo long)" : "ribassista (solo short)")}");
 
@@ -228,7 +228,7 @@ public class BotSchedulerService
                             continue;
                         }
 
-                        // ✅ STRATEGIA PRINCIPALE: EMA Ribbon Trend Following + Candle Confirmation
+                        // ✅ STRATEGIA PRINCIPALE: Position Trading
                         var emaRibbonResult = _emaRibbonStrategy.Analyze(crypto.Symbol, candles, btcBullish);
 
                         if (emaRibbonResult.IsSignal)
@@ -287,7 +287,7 @@ public class BotSchedulerService
                     openTrades.Add(_reportingService.RecordTrade(
                         crypto.Symbol,
                         entryPrice,
-                        "EMA Ribbon Trend Following (Primary)",
+                        "Position Trading (Trend EMA50/200 + Pullback)",
                         isLong,
                         positionResult.StopLossPrice,
                         positionResult.TargetPrice,
@@ -402,18 +402,18 @@ public class BotSchedulerService
     private static string RejectionLabel(RejectionReason reason) => reason switch
     {
         RejectionReason.InsufficientData => "Strategia: dati insufficienti per il calcolo",
-        RejectionReason.TrendNotAligned => "Strategia: trend non allineato (EMA5/10/20/30)",
+        RejectionReason.TrendNotAligned => "Strategia: trend non rialzista (Close>EMA50>EMA200)",
         RejectionReason.NoVolumeData => "Strategia: volume assente",
         RejectionReason.VolumeInsufficient => "Strategia: volume insufficiente",
         RejectionReason.CandleNotStrong => "Strategia: candela non abbastanza forte",
         RejectionReason.PriceVsEma10 => "Strategia: prezzo non conferma vs EMA10",
-        RejectionReason.RsiExtreme => "Strategia: RSI estremo",
-        RejectionReason.NoBreakout => "Strategia: nessun breakout EMA confermato",
+        RejectionReason.RsiExtreme => "Strategia: candela/RSI non confermano la ripartenza",
+        RejectionReason.NoBreakout => "Strategia: nessun pullback confermato su EMA20/50",
         RejectionReason.AgainstBtcRegime => "Strategia: contro il regime BTC",
         RejectionReason.MaxConcurrentTrades => "Risk Manager: troppi trade aperti simultaneamente",
         RejectionReason.ProfitBelowCommissions => "Risk Manager: profitto non copre commissioni",
         RejectionReason.RiskRewardTooLow => "Risk Manager: rapporto rischio/rendimento insufficiente",
-        RejectionReason.StopLossError => "Risk Manager: errore calcolo stop loss",
+        RejectionReason.StopLossError => "Stop non valido o troppo largo",
         _ => "Scarto non classificato"
     };
 
