@@ -2,16 +2,17 @@
 using BotCripto.Services;
 using Newtonsoft.Json.Linq;
 
-// Log su file di tutto l'output (Logs/cycles_yyyy-MM-dd.log; i backtest in Logs/backtest_yyyy-MM-dd.log)
-var logPrefix = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault()?.StartsWith("--backtest", StringComparison.OrdinalIgnoreCase) == true ? "backtest" : "cycles";
-FileLogger.Install(Path.Combine(AppContext.BaseDirectory, "Logs"), logPrefix);
+// Log su file dell'output solo per i backtest (Logs/backtest_yyyy-MM-dd.log).
+// In esecuzione normale il bot scrive solo a schermo: i cicli vanno nella tabella bot6.bot6_cycles.
+if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault()?.StartsWith("--backtest", StringComparison.OrdinalIgnoreCase) == true)
+    FileLogger.Install(Path.Combine(AppContext.BaseDirectory, "Logs"), "backtest");
 Console.WriteLine($"▶️  Avvio Bot 6 - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC - eseguibile in {AppContext.BaseDirectory}");
 
 // All'avvio apre la connessione a SQL Server (database "bot") e scrive a schermo l'esito: OK oppure KO con il motivo.// Se il database non è raggiungibile il bot continua a funzionare.BotDatabase.Initialize();
 // Se il database non è raggiungibile il bot continua a funzionare.
 BotDatabase.Initialize();
 
-// Qualsiasi errore che chiude il processo finisce nel log, così si sa perché il bot si è fermato
+// Qualsiasi errore che chiude il processo viene scritto a schermo, così si sa perché il bot si è fermato
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
     Console.WriteLine($"💥 ERRORE FATALE, il bot si chiude: {e.ExceptionObject}");
 TaskScheduler.UnobservedTaskException += (_, e) =>

@@ -4,32 +4,11 @@ namespace BotCripto.Services;
 
 public class NotificationService
 {
-    private readonly string _logDirectory;
-
-    public NotificationService()
-    {
-        _logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
-        Directory.CreateDirectory(_logDirectory);
-    }
-
+    // Il segnale viene mostrato a schermo; il salvataggio avviene nella tabella bot6.bot6_signals (ReportingService.SaveSignal)
     public Task SendNotificationAsync(AnalysisResult result)
     {
-        var message = FormatNotification(result);
-
-        LogToFile(message);
         ConsoleNotification(result);
-
         return Task.CompletedTask;
-    }
-
-    private void LogToFile(string message)
-    {
-        try
-        {
-            var logFile = Path.Combine(_logDirectory, $"signals_{DateTime.UtcNow:yyyy-MM-dd}.log");
-            File.AppendAllText(logFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC - {message}\n");
-        }
-        catch { }
     }
 
     private void ConsoleNotification(AnalysisResult result)
@@ -51,10 +30,5 @@ public class NotificationService
         Console.WriteLine(new string('=', 60) + "\n");
 
         Console.Beep(800, 500);
-    }
-
-    private string FormatNotification(AnalysisResult result)
-    {
-        return $"[{result.StrategyName}] {result.Symbol}: {result.Signal} @ ${result.CurrentPrice:F8}";
     }
 }
