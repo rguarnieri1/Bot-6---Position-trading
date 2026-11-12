@@ -1,5 +1,7 @@
 using Newtonsoft.Json;
+using BotCripto.Data;
 using BotCripto.Models;
+using Microsoft.EntityFrameworkCore;
 using System.Text;
 
 namespace BotCripto.Services;
@@ -8,6 +10,7 @@ public class ReportingService
 {
     private readonly string _dataDirectory;
     private readonly string _tradesFile;
+    private readonly bool _useDatabase;
     private List<Trade> _trades = new();
 
     public ReportingService()
@@ -15,6 +18,7 @@ public class ReportingService
         _dataDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
         Directory.CreateDirectory(_dataDirectory);
         _tradesFile = Path.Combine(_dataDirectory, "trades.json");
+        _useDatabase = BotDatabase.Initialize();
         LoadTrades();
     }
 
@@ -37,7 +41,7 @@ public class ReportingService
         };
 
         _trades.Add(trade);
-        SaveTrades();
+        SaveTrades(trade, isNew: true);
         return trade;
     }
 
@@ -50,7 +54,7 @@ public class ReportingService
         trade.Profit = profit;
         trade.ProfitPercentage = profitPercentage;
         trade.ExitReason = exitReason;
-        SaveTrades();
+        SaveTrades(trade);
         LogClosedTrade(trade);
     }
 
@@ -64,7 +68,7 @@ public class ReportingService
             trade.Status = "Closed";
             trade.Profit = exitPrice - trade.EntryPrice;
             trade.ProfitPercentage = (trade.Profit.Value / trade.EntryPrice) * 100;
-            SaveTrades();
+            SaveTrades(trade);
             LogClosedTrade(trade);
         }
 
@@ -198,25 +202,71 @@ public class ReportingService
         }
     }
 
+    // Con il database attivo le operazioni si leggono da SQL Server (bot6.bot6_trades); al primo avvio
+    // la tabella vuota viene popolata con le operazioni già presenti in Data/trades.json.
     private void LoadTrades()
+    {
+        _trades = LoadTradesFromFile();
+        if (!_useDatabase)
+            return;
+
+        try
+        {
+            using var db = BotDatabase.CreateContext();
+            var dbTrades = db.Trades.AsNoTracking().OrderBy(t => t.OpenTime).ToList();
+            if (dbTrades.Count == 0 && _trades.Count > 0)
+            {
+                db.Trades.AddRange(_trades);
+                db.SaveChanges();
+            }
+            else
+            {
+                _trades = dbTrades;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️  Errore nel caricamento delle operazioni dal database, uso trades.json: {ex.GetBaseException().Message}");
+        }
+    }
+
+    private List<Trade> LoadTradesFromFile()
     {
         try
         {
             if (File.Exists(_tradesFile))
             {
                 var json = File.ReadAllText(_tradesFile);
-                _trades = JsonConvert.DeserializeObject<List<Trade>>(json) ?? new List<Trade>();
+                return JsonConvert.DeserializeObject<List<Trade>>(json) ?? new List<Trade>();
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Errore nel caricamento delle operazioni: {ex.Message}");
-            _trades = new List<Trade>();
         }
+        return new List<Trade>();
     }
 
-    private void SaveTrades()
+    // Salva il trade nel database (insert o update) e riscrive sempre trades.json come copia di sicurezza.
+    private void SaveTrades(Trade changed, bool isNew = false)
     {
+        if (_useDatabase)
+        {
+            try
+            {
+                using var db = BotDatabase.CreateContext();
+                if (isNew || !db.Trades.Any(t => t.Id == changed.Id))
+                    db.Trades.Add(changed);
+                else
+                    db.Trades.Update(changed);
+                db.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️  Errore nel salvataggio dell'operazione {changed.Symbol} nel database: {ex.GetBaseException().Message}");
+            }
+        }
+
         try
         {
             var json = JsonConvert.SerializeObject(_trades, Formatting.Indented);
@@ -225,6 +275,42 @@ public class ReportingService
         catch (Exception ex)
         {
             Console.WriteLine($"Errore nel salvataggio delle operazioni: {ex.Message}");
+        }
+    }
+
+    // Salva un segnale nella tabella bot6.bot6_signals (solo con il database attivo)
+    public void SaveSignal(SignalRecord signal)
+    {
+        if (!_useDatabase)
+            return;
+
+        try
+        {
+            using var db = BotDatabase.CreateContext();
+            db.Signals.Add(signal);
+            db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️  Errore nel salvataggio del segnale {signal.Symbol} nel database: {ex.GetBaseException().Message}");
+        }
+    }
+
+    // Salva un ciclo nella tabella bot6.bot6_cycles (solo con il database attivo)
+    public void SaveCycle(CycleRecord cycle)
+    {
+        if (!_useDatabase)
+            return;
+
+        try
+        {
+            using var db = BotDatabase.CreateContext();
+            db.Cycles.Add(cycle);
+            db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️  Errore nel salvataggio del ciclo #{cycle.CycleNumber} nel database: {ex.GetBaseException().Message}");
         }
     }
 
