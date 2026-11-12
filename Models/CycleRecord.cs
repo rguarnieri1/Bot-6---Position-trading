@@ -9,9 +9,9 @@ public class CycleRecord
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public string? Timeframe { get; set; }
-    public bool NewCandle { get; set; }             // true = candela appena chiusa, ricerca segnali eseguita
+    public bool NewCandle { get; set; }             // true = prima ricerca segnali su questa candela chiusa
     public DateTime? SignalCandleTime { get; set; } // inizio dell'ultima candela chiusa
-    public string? BtcRegime { get; set; }          // Rialzista / Ribassista / Sconosciuto (solo con ricerca segnali)
+    public string? BtcRegime { get; set; }          // Rialzista / Ribassista / Sconosciuto
     public int? CryptosAnalyzed { get; set; }
     public int TradesClosed { get; set; }
     public int SignalsFound { get; set; }

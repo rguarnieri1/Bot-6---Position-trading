@@ -9,8 +9,6 @@ public class BotSchedulerService
     private const int CandlesPerAnalysis = 300;  // stessa finestra del backtest
     private const int MaxConcurrentFetches = 4;
     private const int MinCandlesForAnalysis = PositionTradingStrategy.MinCandles; // minimo richiesto dalla strategia
-    // Un segnale viene valutato solo entro questo tempo dalla chiusura della candela (niente ingressi in ritardo)
-    private static readonly TimeSpan SignalFreshness = TimeSpan.FromMinutes(30);
 
     private readonly CryptoDataService _dataService;
     private readonly NotificationService _notificationService;
@@ -22,6 +20,9 @@ public class BotSchedulerService
     private bool _isRunning = false;
     private int _cycleRunning = 0;
     private DateTime? _lastScannedCandle;
+    // Simboli il cui segnale sull'ultima candela chiusa è già stato scartato dal Risk Manager e salvato:
+    // la ricerca segnali gira a ogni ciclo sulla stessa candela e non deve salvarli di nuovo.
+    private readonly HashSet<string> _rejectedSignalsSaved = new();
     // Il controllo gira spesso rispetto alla chiusura delle candele: la finestra di freschezza (30 min) contiene più tick,
     // così un tick in ritardo/saltato non fa perdere il segnale. La scansione dei simboli avviene una sola volta per candela.
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
@@ -163,24 +164,26 @@ public class BotSchedulerService
                 _cumulativeRejectionCounts[category] = cc + 1;
             }
 
-            // 2) I segnali si valutano solo su candele chiuse (come nel backtest) e solo subito dopo la chiusura
+            // 2) I segnali si valutano solo su candele chiuse (come nel backtest); la ricerca gira a ogni ciclo
+            //    sull'ultima candela chiusa, così un segnale non si perde se il bot era fermo alla chiusura.
             var btcClosed = ClosedCandles(await GetCandlesCachedAsync("BTC"), now);
             var lastClosedTime = btcClosed.Count > 0 ? btcClosed.Last().Time : (DateTime?)null;
             var lastCloseEnd = lastClosedTime + _timeframeSpan;
-            bool newCandle = lastCloseEnd != null && now - lastCloseEnd.Value <= SignalFreshness && _lastScannedCandle != lastClosedTime;
+            bool newCandle = lastClosedTime != null && _lastScannedCandle != lastClosedTime;
             cycle.NewCandle = newCandle;
             cycle.SignalCandleTime = lastClosedTime;
+            if (newCandle)
+                _rejectedSignalsSaved.Clear();
 
-            if (!newCandle)
+            if (lastClosedTime == null)
             {
-                var nextClose = lastCloseEnd?.Add(_timeframeSpan);
-                Console.WriteLine($"🕒 Nessuna candela {_timeframe} appena chiusa: ricerca segnali alla prossima chiusura ({nextClose:yyyy-MM-dd HH:mm} UTC).");
+                Console.WriteLine($"🕒 Nessuna candela {_timeframe} chiusa disponibile per BTC: ricerca segnali al prossimo ciclo.");
             }
             else
             {
                 // Regime di mercato BTC sulla candela appena chiusa (filtro direzionale della strategia)
                 var btcBullish = PositionTradingStrategy.IsBtcBullish(btcClosed);
-                Console.WriteLine($"🕯️  Candela {_timeframe} chiusa alle {lastCloseEnd:yyyy-MM-dd HH:mm} UTC: ricerca segnali");
+                Console.WriteLine($"🕯️  Candela {_timeframe} chiusa alle {lastCloseEnd:yyyy-MM-dd HH:mm} UTC: ricerca segnali{(newCandle ? " (candela nuova)" : "")}");
                 Console.WriteLine($"₿ Regime BTC: {(btcBullish == null ? "sconosciuto (nessun segnale)" : btcBullish.Value ? "rialzista (solo long)" : "ribassista (solo short)")}");
 
                 _lastScannedCandle = lastClosedTime;
@@ -264,9 +267,12 @@ public class BotSchedulerService
                     {
                         signalsFiltered++;
                         CountRejection(RejectionLabel(positionResult.Rejection));
-                        signalRecord.Accepted = false;
-                        signalRecord.RejectionReason = RejectionLabel(positionResult.Rejection);
-                        _reportingService.SaveSignal(signalRecord);
+                        if (_rejectedSignalsSaved.Add(crypto.Symbol))
+                        {
+                            signalRecord.Accepted = false;
+                            signalRecord.RejectionReason = RejectionLabel(positionResult.Rejection);
+                            _reportingService.SaveSignal(signalRecord);
+                        }
                         continue;
                     }
 
