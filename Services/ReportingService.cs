@@ -55,6 +55,7 @@ public class ReportingService
         trade.ProfitPercentage = profitPercentage;
         trade.ExitReason = exitReason;
         SaveTrades(trade);
+        SaveClosedTrade(trade);
     }
 
     public Task CloseTradeAsync(string symbol, decimal exitPrice)
@@ -68,6 +69,7 @@ public class ReportingService
             trade.Profit = exitPrice - trade.EntryPrice;
             trade.ProfitPercentage = (trade.Profit.Value / trade.EntryPrice) * 100;
             SaveTrades(trade);
+            SaveClosedTrade(trade);
         }
 
         return Task.CompletedTask;
@@ -236,6 +238,27 @@ public class ReportingService
         catch (Exception ex)
         {
             Console.WriteLine($"Errore nel salvataggio delle operazioni: {ex.Message}");
+        }
+    }
+
+    // Salva l'operazione chiusa nella tabella bot6.bot6_operazioni_chiuse (solo con il database attivo);
+    // una riga per trade: se esiste già non viene duplicata.
+    private void SaveClosedTrade(Trade trade)
+    {
+        if (!_useDatabase)
+            return;
+
+        try
+        {
+            using var db = BotDatabase.CreateContext();
+            if (db.ClosedTrades.Any(c => c.TradeId == trade.Id))
+                return;
+            db.ClosedTrades.Add(ClosedTradeRecord.FromTrade(trade));
+            db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️  Errore nel salvataggio dell'operazione chiusa {trade.Symbol} nel database: {ex.GetBaseException().Message}");
         }
     }
 

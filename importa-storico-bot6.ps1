@@ -2,6 +2,7 @@
 #   Data\trades.json          -> bot6.bot6_trades
 #   Logs\signals_*.log        -> bot6.bot6_signals
 #   Logs\cycles_*.log         -> bot6.bot6_cycles
+#   trade chiusi              -> bot6.bot6_operazioni_chiuse (da bot6.bot6_trades, stessi dati di Logs\Operazioni_chiuse.log)
 # Si puo rieseguire: le righe gia presenti (stesso Id / stesso simbolo e orario / stesso orario di inizio ciclo)
 # non vengono duplicate. L'esito viene scritto in importa-storico-bot6-log.txt.
 # Da eseguire a bot fermo.
@@ -67,6 +68,20 @@ VALUES (@Id, @Symbol, @OpenTime, @CloseTime, @EntryPrice, @ExitPrice, @Strategy,
             @('@SignalCandleTime', $T::DateTime2, (ToDate $t.SignalCandleTime)), @('@ExitReason', $T::NVarChar, $t.ExitReason))))
     }
     Log "Trades: $($trades.Count) nel file, $n inseriti"
+
+    # ---------- OPERAZIONI CHIUSE ----------
+    # Stessi dati di Logs\Operazioni_chiuse.log, presi dai trade chiusi (valori non arrotondati)
+    $n = [Math]::Max(0, (Exec $conn $tx @"
+INSERT INTO bot6.bot6_operazioni_chiuse (TradeId, Symbol, Strategy, IsLong, StopLoss, TargetPrice, ExitReason, EntryPrice, ExitPrice,
+                                         Profit, ProfitPercentage, Status, OpenTime, CloseTime, Bot)
+SELECT t.Id, t.Symbol, t.Strategy, t.IsLong, t.StopLoss, t.TargetPrice, t.ExitReason, t.EntryPrice, t.ExitPrice,
+       t.Profit, t.ProfitPercentage, t.Status, t.OpenTime, t.CloseTime, N'Bot 6'
+FROM bot6.bot6_trades t
+WHERE t.Status = N'Closed' AND t.CloseTime IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM bot6.bot6_operazioni_chiuse c WHERE c.TradeId = t.Id)
+ORDER BY t.CloseTime
+"@ @()))
+    Log "Operazioni chiuse: $n inserite"
 
     # ---------- SIGNALS ----------
     # Riga del log: "2026-10-20 00:03:40 UTC - [Strategia] PEPE: BUY @ `$0,00000415"

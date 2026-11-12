@@ -10,7 +10,8 @@ public class BotDbContext : DbContext
 {
     public const string Schema = "bot6";
 
-    // Valore fisso della colonna Bot nelle tabelle bot6.bot6_trades, bot6.bot6_signals e bot6.bot6_cycles
+    // Valore fisso della colonna Bot nelle tabelle bot6.bot6_trades, bot6.bot6_signals, bot6.bot6_cycles
+    // e bot6.bot6_operazioni_chiuse
     public const string BotName = "Bot 6";
 
     private const string BotColumn = "Bot";
@@ -25,6 +26,7 @@ public class BotDbContext : DbContext
     public DbSet<Trade> Trades => Set<Trade>();
     public DbSet<SignalRecord> Signals => Set<SignalRecord>();
     public DbSet<CycleRecord> Cycles => Set<CycleRecord>();
+    public DbSet<ClosedTradeRecord> ClosedTrades => Set<ClosedTradeRecord>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -80,6 +82,20 @@ public class BotDbContext : DbContext
             e.Property(c => c.Timeframe).HasMaxLength(10);
             e.Property(c => c.BtcRegime).HasMaxLength(20);
             ConfigureCommon(e, typeof(CycleRecord));
+        });
+
+        modelBuilder.Entity<ClosedTradeRecord>(e =>
+        {
+            e.ToTable("bot6_operazioni_chiuse");
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Id).UseIdentityColumn();
+            e.Property(c => c.TradeId).HasMaxLength(36);
+            e.Property(c => c.Symbol).HasMaxLength(50);
+            e.Property(c => c.Strategy).HasMaxLength(200);
+            e.Property(c => c.ExitReason).HasMaxLength(100);
+            e.Property(c => c.Status).HasMaxLength(20);
+            e.HasIndex(c => c.TradeId).IsUnique();
+            ConfigureCommon(e, typeof(ClosedTradeRecord));
         });
     }
 

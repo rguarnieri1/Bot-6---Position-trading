@@ -11,7 +11,7 @@ try {
     foreach ($b in $batches) {
         $cmd = $conn.CreateCommand(); $cmd.CommandText = $b; [void]$cmd.ExecuteNonQuery()
     }
-    foreach ($t in 'bot6_trades', 'bot6_signals', 'bot6_cycles') {
+    foreach ($t in 'bot6_trades', 'bot6_signals', 'bot6_cycles', 'bot6_operazioni_chiuse') {
         $cmd = $conn.CreateCommand()
         $cmd.CommandText = "SELECT c.name + ' ' + t.name FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(N'bot6.$t') ORDER BY c.column_id"
         $r = $cmd.ExecuteReader(); "Colonne bot6.${t}:" | Out-File $log -Append -Encoding utf8
