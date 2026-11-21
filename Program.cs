@@ -39,6 +39,11 @@ var tradingSettings = appSettings["TradingSettings"] ?? throw new InvalidOperati
 var marketSettings = appSettings["MarketMonitoring"] ?? throw new InvalidOperationException("appsettings.json: sezione MarketMonitoring mancante");
 decimal CapitalPerTrade = tradingSettings.Value<decimal?>("CapitalPerTrade") ?? throw new InvalidOperationException("appsettings.json: CapitalPerTrade mancante");
 decimal RewardRiskRatio =tradingSettings.Value<decimal?>("RewardRiskRatio") ?? throw new InvalidOperationException("appsettings.json: RewardRiskRatio mancante");
+// Tetto di posizioni aperte contemporaneamente (backtest e live): i segnali oltre il tetto vengono scartati, dal più debole.
+int MaxOpenPositions = tradingSettings.Value<int?>("MaxOpenPositions") ?? int.MaxValue;
+// Short abilitati (specchio dei long). La variabile BOT6_SHORTS, se presente, ha la precedenza (backtest di prova).
+if (Environment.GetEnvironmentVariable("BOT6_SHORTS") == null)
+    BotCripto.Strategies.PositionTradingStrategy.AllowShort = tradingSettings.Value<bool?>("EnableShorts") ?? false;
 string Timeframe = marketSettings.Value<string>("TimeframeForCandlesticks") ?? throw new InvalidOperationException("appsettings.json: TimeframeForCandlesticks mancante");
 
 // Check se è backtest mode
@@ -95,7 +100,7 @@ else
 
 async Task RunLiveAsync()
 {
-    var scheduler = new BotSchedulerService(Timeframe, RewardRiskRatio, CapitalPerTrade);
+    var scheduler = new BotSchedulerService(Timeframe, RewardRiskRatio, CapitalPerTrade, MaxOpenPositions);
 
     Console.WriteLine("Strategia Principale Attiva:");
     Console.WriteLine("  ⭐ EMA Ribbon Trend Following + Candle Confirmation");
@@ -107,6 +112,7 @@ async Task RunLiveAsync()
     Console.WriteLine("  • Intervallo Monitoraggio: 20 minuti (controllo stop/target e ricerca segnali)");
     Console.WriteLine("  • Max Crypto: 500");
     Console.WriteLine($"  • Importo per trade: €{CapitalPerTrade:F2}");
+    Console.WriteLine($"  • Max posizioni aperte contemporaneamente: {(MaxOpenPositions == int.MaxValue ? "illimitate" : MaxOpenPositions)}");
     Console.WriteLine($"  • Take profit: {RewardRiskRatio}x la distanza dello stop");
     Console.WriteLine("  • Report Settimanale: Lunedì 00:00");
     Console.WriteLine("  • Tracking Metriche: Ogni 10 cicli");
@@ -129,7 +135,7 @@ async Task RunRealBacktestAsync(DateTime startDate, DateTime endDate, string tim
 {
     Console.WriteLine($"\n🔍 MODALITA' BACKTEST SU DATI STORICI REALI ATTIVATA ({startDate:yyyy-MM-dd} → {endDate:yyyy-MM-dd}, {timeframe}, capitale illimitato, €{CapitalPerTrade:F2} per trade, R:R {rewardRisk})\n");
 
-    var backtestService = new BacktestService(rewardRisk, CapitalPerTrade);
+    var backtestService = new BacktestService(rewardRisk, CapitalPerTrade, MaxOpenPositions);
 
     try
     {

@@ -36,8 +36,11 @@ public class BotSchedulerService
     private readonly Dictionary<string, int> _cumulativeRejectionCounts = new();
 
     // Capitale investibile illimitato: nessun importo totale, solo un importo fisso per trade (capitalPerTrade)
-    public BotSchedulerService(string timeframe, decimal rewardRiskRatio, decimal capitalPerTrade)
+    private readonly int _maxOpenPositions;
+
+    public BotSchedulerService(string timeframe, decimal rewardRiskRatio, decimal capitalPerTrade, int maxOpenPositions = int.MaxValue)
     {
+        _maxOpenPositions = maxOpenPositions;
         _timeframe = timeframe;
         _timeframeSpan = BacktestService.TimeframeToTimeSpan(timeframe);
         _dataService = new CryptoDataService();
@@ -233,7 +236,10 @@ public class BotSchedulerService
                         }
 
                         // ✅ STRATEGIA PRINCIPALE: Position Trading
-                        var emaRibbonResult = _emaRibbonStrategy.Analyze(crypto.Symbol, candles, btcBullish);
+                        var relStrength = PositionTradingStrategy.CalculateRelativeStrength(candles, btcClosed);
+                        var emaRibbonResult = _emaRibbonStrategy.Analyze(crypto.Symbol, candles, btcBullish, relStrength);
+                        if (relStrength != null)
+                            emaRibbonResult.Indicators["RelStrength"] = relStrength.Value;
 
                         if (emaRibbonResult.IsSignal)
                             candidates.Add((crypto, emaRibbonResult, candles));
@@ -248,8 +254,18 @@ public class BotSchedulerService
                 }
 
                 // Dal segnale più forte al più debole (capitale illimitato: entrano tutti i segnali validi)
-                foreach (var (crypto, emaRibbonResult, candles) in candidates.OrderByDescending(c => c.analysis.Indicators.GetValueOrDefault("SignalStrength")))
+                foreach (var (crypto, emaRibbonResult, candles) in candidates.OrderByDescending(c => PositionTradingStrategy.RsSort && c.analysis.Indicators.ContainsKey("RelStrength")
+                    ? (c.analysis.Signal.Contains("BUY") ? 1m : -1m) * c.analysis.Indicators["RelStrength"]
+                    : c.analysis.Indicators.GetValueOrDefault("SignalStrength")))
                 {
+                    // Tetto di posizioni aperte: i segnali più deboli oltre il tetto vengono scartati (come nel backtest)
+                    if (openTrades.Count >= _maxOpenPositions)
+                    {
+                        signalsFiltered++;
+                        CountRejection(RejectionLabel(RejectionReason.MaxConcurrentTrades));
+                        continue;
+                    }
+
                     var isLong = emaRibbonResult.Signal.Contains("BUY");
                     // Ingresso alla chiusura della candela del segnale (come nel backtest), non al prezzo live:
                     // lo stop della strategia è calcolato su quella candela e i controlli stop/target partono dalla successiva.

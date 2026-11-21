@@ -254,6 +254,24 @@ public class CryptoDataService
     // a pagine da 300 candele andando indietro con end_ts, fino a coprire [from, to].
     public async Task<List<Candle>> GetHistoricalCandlesAsync(string symbol, string interval, DateTime from, DateTime to)
     {
+        // Cache su disco opzionale (solo se BOT6_CANDLE_CACHE è impostata): usata per ottimizzare i parametri senza riscaricare.
+        var cacheDir = Environment.GetEnvironmentVariable("BOT6_CANDLE_CACHE");
+        string? cacheFile = null;
+        if (!string.IsNullOrEmpty(cacheDir))
+        {
+            Directory.CreateDirectory(cacheDir);
+            cacheFile = Path.Combine(cacheDir, $"{symbol}_{interval}_{from:yyyyMMdd}_{to:yyyyMMdd}.json");
+            if (File.Exists(cacheFile))
+                return JsonConvert.DeserializeObject<List<Candle>>(File.ReadAllText(cacheFile)) ?? new List<Candle>();
+        }
+        var fetched = await GetHistoricalCandlesCoreAsync(symbol, interval, from, to);
+        if (cacheFile != null)
+            File.WriteAllText(cacheFile, JsonConvert.SerializeObject(fetched));
+        return fetched;
+    }
+
+    private async Task<List<Candle>> GetHistoricalCandlesCoreAsync(string symbol, string interval, DateTime from, DateTime to)
+    {
         var all = new Dictionary<DateTime, Candle>();
         var endTs = new DateTimeOffset(DateTime.SpecifyKind(to, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 

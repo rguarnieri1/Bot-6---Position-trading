@@ -32,8 +32,11 @@ public class BacktestService
     private readonly PositionTradingStrategy _strategy;
 
     // Capitale investibile illimitato: ogni trade investe un importo fisso (capitalPerTrade), senza tetto totale
-    public BacktestService(decimal rewardRiskRatio, decimal capitalPerTrade)
+    private readonly int _maxOpenPositions;
+
+    public BacktestService(decimal rewardRiskRatio, decimal capitalPerTrade, int maxOpenPositions = int.MaxValue)
     {
+        _maxOpenPositions = maxOpenPositions;
         _dataService = new CryptoDataService();
         _strategy = new PositionTradingStrategy();
         _riskManager = new RiskManager(
@@ -84,6 +87,9 @@ public class BacktestService
         var warmup = TimeSpan.FromTicks(Math.Max(TimeSpan.FromDays(MinWarmupDays).Ticks, TimeframeToTimeSpan(timeframe).Ticks * (WarmupCandles + 60)));
         var historyFrom = startDate - warmup;
         var btcCandles = await _dataService.GetHistoricalCandlesAsync("BTC", timeframe, historyFrom, endDate);
+        var btcCloseByTime = btcCandles.GroupBy(c => c.Time).ToDictionary(g => g.Key, g => g.First().Close);
+        int rsPeriod = PositionTradingStrategy.RsPeriod; // candele per la forza relativa
+        bool rsSort = PositionTradingStrategy.RsSort;
         var btcRegime = new Dictionary<DateTime, bool?>();
         for (int i = 0; i < btcCandles.Count; i++)
             btcRegime[btcCandles[i].Time] = PositionTradingStrategy.IsBtcBullish(Window(btcCandles, i));
@@ -114,6 +120,10 @@ public class BacktestService
         // 2) Simulazione di portafoglio con capitale illimitato: ogni segnale valido apre una posizione
         //    di importo fisso; il drawdown è misurato sulla curva del P&L cumulato (realizzato + non realizzato).
         var openPositions = new Dictionary<string, OpenPosition>();
+        // Opzioni di test (variabili d'ambiente, default = comportamento originale):
+        // BOT6_MAX_POS = tetto di posizioni (sovrascrive MaxOpenPositions di appsettings.json); BOT6_BTC_EXIT=1 = chiude tutto se BTC scende sotto la sua EMA.
+        int maxPos = int.TryParse(Environment.GetEnvironmentVariable("BOT6_MAX_POS"), out var mp) ? mp : _maxOpenPositions;
+        bool btcExit = Environment.GetEnvironmentVariable("BOT6_BTC_EXIT") == "1";
         decimal realizedPnl = 0m;
         decimal peakPnl = 0m;
         decimal maxDrawdownAmount = 0m;
@@ -159,6 +169,8 @@ public class BacktestService
                 // Se in una stessa candela vengono toccati entrambi, assumiamo lo stop loss (ipotesi conservativa)
                 if (hitStop || hitTarget)
                     ClosePosition(symbol, hitStop ? pos.StopLoss : pos.Target, time, !hitStop);
+                else if (btcExit && btcRegime.GetValueOrDefault(time) == false)
+                    ClosePosition(symbol, candle.Close, time, false);
             }
 
             // b) Nuovi segnali (solo dentro la finestra richiesta), dal più forte al più debole:
@@ -170,14 +182,25 @@ public class BacktestService
                     if (openPositions.ContainsKey(symbol) || !indexBySymbol[symbol].TryGetValue(time, out var idx) || idx < WarmupCandles)
                         continue;
 
-                    var analysis = _strategy.Analyze(symbol, Window(candles, idx), btcRegime.GetValueOrDefault(time));
+                    // Forza relativa: rendimento del simbolo meno quello di BTC sulle ultime rsPeriod candele
+                    decimal? rs = null;
+                    if (idx >= rsPeriod && btcCloseByTime.TryGetValue(time, out var btcNow) && btcCloseByTime.TryGetValue(candles[idx - rsPeriod].Time, out var btcPrev)
+                        && candles[idx - rsPeriod].Close > 0 && btcPrev > 0)
+                        rs = candles[idx].Close / candles[idx - rsPeriod].Close - btcNow / btcPrev;
+
+                    var analysis = _strategy.Analyze(symbol, Window(candles, idx), btcRegime.GetValueOrDefault(time), rs);
+                    if (rs != null) analysis.Indicators["RelStrength"] = rs.Value;
                     if (analysis.IsSignal)
                         candidates.Add((symbol, candles[idx], analysis));
                 }
 
-                foreach (var (symbol, candle, analysis) in candidates.OrderByDescending(c => c.analysis.Indicators.GetValueOrDefault("SignalStrength")))
+                foreach (var (symbol, candle, analysis) in candidates.OrderByDescending(c => rsSort && c.analysis.Indicators.ContainsKey("RelStrength")
+                    ? (c.analysis.Signal.Contains("BUY") ? 1m : -1m) * c.analysis.Indicators["RelStrength"]
+                    : c.analysis.Indicators.GetValueOrDefault("SignalStrength")))
                 {
                     totalSignals++;
+                    if (openPositions.Count >= maxPos)
+                        continue;
 
                     var isLong = analysis.Signal.Contains("BUY");
                     var sizing = _riskManager.CalculatePosition(
