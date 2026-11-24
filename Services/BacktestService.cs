@@ -258,7 +258,11 @@ public class BacktestService
 
         // Una posizione ancora aperta a fine periodo viene chiusa al prezzo dell'ultima candela
         // testata (mark-to-market), altrimenti le perdite/guadagni non realizzati sparirebbero dalle metriche.
-        foreach (var symbol in openPositions.Keys.ToList())
+        // Con BACKTEST_ONLY_CLOSED=1 le posizioni ancora aperte vengono escluse dal P&L (solo operazioni realmente chiuse).
+        var onlyClosed = Environment.GetEnvironmentVariable("BACKTEST_ONLY_CLOSED") == "1";
+        if (onlyClosed && openPositions.Count > 0)
+            Console.WriteLine($"ℹ️  {openPositions.Count} posizioni ancora aperte a fine periodo escluse dal P&L (BACKTEST_ONLY_CLOSED=1)");
+        foreach (var symbol in onlyClosed ? new List<string>() : openPositions.Keys.ToList())
         {
             var lastCandle = candlesBySymbol[symbol].Last(c => c.Time <= endDate);
             ClosePosition(symbol, lastCandle.Close, lastCandle.Time, false);
